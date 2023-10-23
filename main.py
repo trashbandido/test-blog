@@ -1,5 +1,6 @@
+import smtplib
 from datetime import date
-from flask import Flask, abort, render_template, redirect, url_for, flash
+from flask import Flask, abort, render_template, redirect, url_for, flash, request
 from flask_bootstrap import Bootstrap5
 from flask_ckeditor import CKEditor
 from flask_gravatar import Gravatar
@@ -8,13 +9,17 @@ from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import relationship
+import os
+from smtplib import SMTP
 
 # Import your forms from the forms.py
 from forms import CreatePostForm, RegistrationForm, LoginForm, CommentForm
 
+SENDER = os.environ.get("EMAIL")
+SENDER_PASSWORD = os.environ.get("EMAIL_PASSWORD")
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'dd953b21f029919f765c1a77f734b46531f042a72fe0f68c830b0681c98a4dfd'
+app.config['SECRET_KEY'] = os.environ.get("FLASK_KEY")
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 gravatar = Gravatar(
@@ -34,7 +39,8 @@ def load_user(user_id):
 
 
 # CONNECT TO DB
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DB_URI", "sqlite:///posts.db")
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
 db = SQLAlchemy()
 db.init_app(app)
 
@@ -91,8 +97,6 @@ with app.app_context():
 
 @app.route('/register', methods=["GET", "POST"])
 def register():
-    print(current_user)
-    print(current_user.is_authenticated)
     r_form = RegistrationForm()
     if r_form.validate_on_submit():
         if db.session.execute(db.select(User).where(User.email == r_form.email.data)).scalar():
@@ -112,7 +116,6 @@ def register():
 
 @app.route('/login', methods=["GET", "POST"])
 def login():
-    print(current_user)
     l_form = LoginForm()
     if l_form.validate_on_submit():
         queried_user = db.session.execute(db.select(User).where(User.email == l_form.email.data)).scalar()
@@ -133,17 +136,12 @@ def logout():
 
 @app.route('/')
 def get_all_posts():
-    print(current_user)
-    print(current_user.is_authenticated)
-    print(current_user.is_anonymous)
     result = db.session.execute(db.select(BlogPost))
     posts = result.scalars().all()
     return render_template("index.html", all_posts=posts)
 
 @app.route("/post/<int:post_id>", methods=["GET", "POST"])
 def show_post(post_id):
-    print(current_user)
-    print(current_user.is_authenticated)
     requested_post = db.get_or_404(BlogPost, post_id)
     requested_comments = requested_post.comments
     c_form = CommentForm()
@@ -166,8 +164,6 @@ def show_post(post_id):
 @app.route("/new-post", methods=["GET", "POST"])
 @admin_only
 def add_new_post():
-    print(current_user)
-    print(current_user.is_authenticated)
     form = CreatePostForm()
     if form.validate_on_submit():
         new_post = BlogPost(
@@ -187,8 +183,6 @@ def add_new_post():
 @app.route("/edit-post/<int:post_id>", methods=["GET", "POST"])
 @admin_only
 def edit_post(post_id):
-    print(current_user)
-    print(current_user.is_authenticated)
     post = db.get_or_404(BlogPost, post_id)
     edit_form = CreatePostForm(
         title=post.title,
@@ -211,8 +205,6 @@ def edit_post(post_id):
 @app.route("/delete/<int:post_id>")
 @admin_only
 def delete_post(post_id):
-    print(current_user)
-    print(current_user.is_authenticated)
     post_to_delete = db.get_or_404(BlogPost, post_id)
     db.session.delete(post_to_delete)
     db.session.commit()
@@ -221,18 +213,29 @@ def delete_post(post_id):
 
 @app.route("/about")
 def about():
-    print(current_user)
-    print(current_user.is_authenticated)
     return render_template("about.html")
 
 
-@app.route("/contact")
+@app.route("/contact", methods=["GET", "POST"])
 def contact():
-    print(current_user)
-    print(current_user.is_authenticated)
+    if request.method == "POST":
+        body = f"Name: {request.form['name']}\n" \
+               f"Email: {request.form['email']}\n" \
+               f"Phone: {request.form['phone']}\n" \
+               f"Message: {request.form['message']}"
+
+        with SMTP(host="smtp.gmail.com") as connection:
+            connection.starttls()
+            connection.login(user=SENDER, password=SENDER_PASSWORD)
+            connection.sendmail(
+                from_addr=SENDER,
+                to_addrs=SENDER,
+                msg=f"Subject: Blog Contact \n\n{body}"
+            )
+        return redirect(url_for("contact"))
     return render_template("contact.html")
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8080)
+    app.run(debug=False, port=8080)
 
